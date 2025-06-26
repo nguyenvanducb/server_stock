@@ -17,7 +17,7 @@ func main() {
 
 	r.GET("/api/tc", func(c *gin.Context) {
 		// MongoDB URI nội bộ
-		mongoURI := "mongodb://admin:abc123@34.124.191.19:27017/admin"
+		mongoURI := "mongodb://admin:abc123@127.0.0.1:27017/admin"
 
 		// Kết nối MongoDB
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
