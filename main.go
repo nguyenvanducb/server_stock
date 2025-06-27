@@ -12,125 +12,53 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+var mongoClient *mongo.Client
+
 func main() {
+	// Khởi tạo kết nối MongoDB một lần duy nhất
+	var err error
+	mongoURI := "mongodb://admin:abc123@127.0.0.1:27017/admin"
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	mongoClient, err = mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
+	if err != nil {
+		log.Fatalf("MongoDB connection failed: %v", err)
+	}
+	defer mongoClient.Disconnect(ctx)
+
 	r := gin.Default()
 
-	r.GET("/api/tc", func(c *gin.Context) {
-		// MongoDB URI nội bộ
-		mongoURI := "mongodb://admin:abc123@127.0.0.1:27017/admin"
+	// Đăng ký các route sử dụng handler chung
+	r.GET("/api/tc", getCollectionHandler("moneyflow", "tc"))
+	r.GET("/api/code", getCollectionHandler("moneyflow", "stock_code"))
+	r.GET("/api/info", getCollectionHandler("moneyflow", "info_stocks"))
 
-		// Kết nối MongoDB
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		clientOpts := options.Client().ApplyURI(mongoURI)
-		client, err := mongo.Connect(ctx, clientOpts)
-		if err != nil {
-			log.Println("MongoDB connection error:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "MongoDB connection failed"})
-			return
-		}
-
-		// Truy cập collection tc trong db moneyflow
-		collection := client.Database("moneyflow").Collection("tc")
-
-		// Truy vấn tất cả dữ liệu
-		cursor, err := collection.Find(ctx, bson.D{})
-		if err != nil {
-			log.Println("Query error:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Query failed"})
-			return
-		}
-		defer cursor.Close(ctx)
-
-		var results []bson.M
-		if err := cursor.All(ctx, &results); err != nil {
-			log.Println("Cursor decode error:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Decode failed"})
-			return
-		}
-
-		// Trả về dữ liệu JSON
-		c.JSON(http.StatusOK, gin.H{"data": results})
-	})
-	r.GET("/api/code", func(c *gin.Context) {
-		// MongoDB URI nội bộ
-		mongoURI := "mongodb://admin:abc123@127.0.0.1:27017/admin"
-
-		// Kết nối MongoDB
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		clientOpts := options.Client().ApplyURI(mongoURI)
-		client, err := mongo.Connect(ctx, clientOpts)
-		if err != nil {
-			log.Println("MongoDB connection error:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "MongoDB connection failed"})
-			return
-		}
-
-		// Truy cập collection tc trong db moneyflow
-		collection := client.Database("moneyflow").Collection("stock_code")
-
-		// Truy vấn tất cả dữ liệu
-		cursor, err := collection.Find(ctx, bson.D{})
-		if err != nil {
-			log.Println("Query error:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Query failed"})
-			return
-		}
-		defer cursor.Close(ctx)
-
-		var results []bson.M
-		if err := cursor.All(ctx, &results); err != nil {
-			log.Println("Cursor decode error:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Decode failed"})
-			return
-		}
-
-		// Trả về dữ liệu JSON
-		c.JSON(http.StatusOK, gin.H{"data": results})
-	})
-
-	r.GET("/api/info", func(c *gin.Context) {
-		// MongoDB URI nội bộ
-		mongoURI := "mongodb://admin:abc123@127.0.0.1:27017/admin"
-
-		// Kết nối MongoDB
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		clientOpts := options.Client().ApplyURI(mongoURI)
-		client, err := mongo.Connect(ctx, clientOpts)
-		if err != nil {
-			log.Println("MongoDB connection error:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "MongoDB connection failed"})
-			return
-		}
-
-		// Truy cập collection tc trong db moneyflow
-		collection := client.Database("moneyflow").Collection("info_stocks")
-
-		// Truy vấn tất cả dữ liệu
-		cursor, err := collection.Find(ctx, bson.D{})
-		if err != nil {
-			log.Println("Query error:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Query failed"})
-			return
-		}
-		defer cursor.Close(ctx)
-
-		var results []bson.M
-		if err := cursor.All(ctx, &results); err != nil {
-			log.Println("Cursor decode error:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Decode failed"})
-			return
-		}
-
-		// Trả về dữ liệu JSON
-		c.JSON(http.StatusOK, gin.H{"data": results})
-	})
-
-	// Chạy server tại port 8080
 	r.Run(":8001")
+}
+
+// getCollectionHandler trả về một handler cho route cụ thể
+func getCollectionHandler(dbName, collName string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		collection := mongoClient.Database(dbName).Collection(collName)
+		cursor, err := collection.Find(ctx, bson.D{})
+		if err != nil {
+			log.Println("Query error:", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Query failed"})
+			return
+		}
+		defer cursor.Close(ctx)
+
+		var results []bson.M
+		if err := cursor.All(ctx, &results); err != nil {
+			log.Println("Decode error:", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Decode failed"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": results})
+	}
 }
