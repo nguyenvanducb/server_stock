@@ -11,6 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/sync/singleflight"
 )
 
 var mongoClient *mongo.Client
@@ -38,42 +39,57 @@ func main() {
 	r.Run(":8001")
 }
 
-var cache sync.Map
+var (
+	cache sync.Map
+	group singleflight.Group
+)
 
 func getCachedHandler(dbName, collName string, ttl time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cacheKey := dbName + "_" + collName
 
+		// Check cache trước
 		if data, ok := cache.Load(cacheKey); ok {
 			c.JSON(http.StatusOK, gin.H{"data": data})
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+		// Dùng singleflight để tránh nhiều request cùng truy vấn DB
+		v, err, _ := group.Do(cacheKey, func() (interface{}, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
 
-		collection := mongoClient.Database(dbName).Collection(collName)
-		cursor, err := collection.Find(ctx, bson.D{})
+			collection := mongoClient.Database(dbName).Collection(collName)
+			cursor, err := collection.Find(ctx, bson.D{})
+			if err != nil {
+				return nil, err
+			}
+			defer cursor.Close(ctx)
+
+			var results []bson.M
+			if err := cursor.All(ctx, &results); err != nil {
+				return nil, err
+			}
+
+			// Lưu vào cache
+			cache.Store(cacheKey, results)
+
+			// Tạo goroutine xóa sau TTL
+			go func() {
+				time.Sleep(ttl)
+				cache.Delete(cacheKey)
+			}()
+
+			return results, nil
+		})
+
+		// Xử lý lỗi nếu có
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Query failed"})
-			return
-		}
-		defer cursor.Close(ctx)
-
-		var results []bson.M
-		if err := cursor.All(ctx, &results); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Decode failed"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		cache.Store(cacheKey, results)
-
-		// Xóa cache sau TTL
-		go func() {
-			time.Sleep(ttl)
-			cache.Delete(cacheKey)
-		}()
-
-		c.JSON(http.StatusOK, gin.H{"data": results})
+		// Trả dữ liệu đã được truy vấn
+		c.JSON(http.StatusOK, gin.H{"data": v})
 	}
 }
