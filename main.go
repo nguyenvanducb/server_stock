@@ -51,7 +51,7 @@ func main() {
 		}
 
 		// Trả về dữ liệu JSON
-		c.JSON(http.StatusOK, results)
+		c.JSON(http.StatusOK, gin.H{"data": results})
 	})
 	r.GET("/api/code", func(c *gin.Context) {
 		// MongoDB URI nội bộ
@@ -89,10 +89,10 @@ func main() {
 		}
 
 		// Trả về dữ liệu JSON
-		c.JSON(http.StatusOK, results)
+		c.JSON(http.StatusOK, gin.H{"data": results})
 	})
 
-		r.GET("/api/info", func(c *gin.Context) {
+	r.GET("/api/info", func(c *gin.Context) {
 		// MongoDB URI nội bộ
 		mongoURI := "mongodb://admin:abc123@127.0.0.1:27017/admin"
 
@@ -128,7 +128,7 @@ func main() {
 		}
 
 		// Trả về dữ liệu JSON
-		c.JSON(http.StatusOK, results)
+		c.JSON(http.StatusOK, gin.H{"data": results})
 	})
 
 	// Chạy server tại port 8080
