@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -30,23 +31,30 @@ func main() {
 	r := gin.Default()
 
 	// Đăng ký các route sử dụng handler chung
-	r.GET("/api/tc", getCollectionHandler("moneyflow", "tc"))
-	r.GET("/api/code", getCollectionHandler("moneyflow", "stock_code"))
-	r.GET("/api/info", getCollectionHandler("moneyflow", "info_stocks"))
+	r.GET("/api/tc", getCachedHandler("moneyflow", "tc", 1000*time.Second))
+	r.GET("/api/tc", getCachedHandler("moneyflow", "stock_code", 10*time.Second))
+	r.GET("/api/tc", getCachedHandler("moneyflow", "info_stocks", 100000*time.Second))
 
 	r.Run(":8001")
 }
 
-// getCollectionHandler trả về một handler cho route cụ thể
-func getCollectionHandler(dbName, collName string) gin.HandlerFunc {
+var cache sync.Map
+
+func getCachedHandler(dbName, collName string, ttl time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		cacheKey := dbName + "_" + collName
+
+		if data, ok := cache.Load(cacheKey); ok {
+			c.JSON(http.StatusOK, gin.H{"data": data})
+			return
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
 		collection := mongoClient.Database(dbName).Collection(collName)
 		cursor, err := collection.Find(ctx, bson.D{})
 		if err != nil {
-			log.Println("Query error:", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Query failed"})
 			return
 		}
@@ -54,10 +62,17 @@ func getCollectionHandler(dbName, collName string) gin.HandlerFunc {
 
 		var results []bson.M
 		if err := cursor.All(ctx, &results); err != nil {
-			log.Println("Decode error:", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Decode failed"})
 			return
 		}
+
+		cache.Store(cacheKey, results)
+
+		// Xóa cache sau TTL
+		go func() {
+			time.Sleep(ttl)
+			cache.Delete(cacheKey)
+		}()
 
 		c.JSON(http.StatusOK, gin.H{"data": results})
 	}
