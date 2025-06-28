@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -19,7 +20,7 @@ var mongoClient *mongo.Client
 func main() {
 	// Khởi tạo kết nối MongoDB một lần duy nhất
 	var err error
-	mongoURI := "mongodb://admin:abc123@127.0.0.1:27017/admin"
+	mongoURI := "mongodb://admin:abc123@34.124.191.19:27017/admin"
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -33,8 +34,9 @@ func main() {
 
 	// Đăng ký các route sử dụng handler chung
 	r.GET("/api/tc", getCachedHandler("moneyflow", "tc", 1000*time.Second))
-	r.GET("/api/tc", getCachedHandler("moneyflow", "stock_code", 10*time.Second))
-	r.GET("/api/tc", getCachedHandler("moneyflow", "info_stocks", 100000*time.Second))
+	r.GET("/api/code", getCachedHandler("moneyflow", "stock_code", 10*time.Second))
+	r.GET("/api/info", getCachedHandler("moneyflow", "info_stocks", 100000*time.Second))
+	r.GET("/api/orders", getOrdersHandler)
 
 	r.Run(":8001")
 }
@@ -92,4 +94,63 @@ func getCachedHandler(dbName, collName string, ttl time.Duration) gin.HandlerFun
 		// Trả dữ liệu đã được truy vấn
 		c.JSON(http.StatusOK, gin.H{"data": v})
 	}
+}
+
+func getOrdersHandler(c *gin.Context) {
+	symbol := c.Query("symbol")
+	dateStr := c.Query("date")
+	limitStr := c.DefaultQuery("limit", "20")
+	pageStr := c.DefaultQuery("page", "1")
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = 20
+	}
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page <= 0 {
+		page = 1
+	}
+	skip := (page - 1) * limit
+
+	// Parse ngày
+	layout := "2006-01-02"
+	dayStart, err := time.Parse(layout, dateStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date format. Use YYYY-MM-DD"})
+		return
+	}
+	dayEnd := dayStart.Add(24 * time.Hour)
+
+	filter := bson.M{
+		"symbol": symbol,
+		"time": bson.M{
+			"$gte": dayStart,
+			"$lt":  dayEnd,
+		},
+	}
+
+	collection := mongoClient.Database("moneyflow").Collection("orders")
+	opts := options.Find().SetSort(bson.M{"time": -1}).SetSkip(int64(skip)).SetLimit(int64(limit))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cursor, err := collection.Find(ctx, filter, opts)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var results []bson.M
+	if err := cursor.All(ctx, &results); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  results,
+		"page":  page,
+		"limit": limit,
+	})
 }
