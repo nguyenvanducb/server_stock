@@ -20,7 +20,7 @@ var mongoClient *mongo.Client
 func main() {
 	// Khởi tạo kết nối MongoDB một lần duy nhất
 	var err error
-	mongoURI := "mongodb://admin:abc123@34.124.191.19:27017/admin"
+	mongoURI := "mongodb://admin:abc123@127.0.0.1:27017/admin"
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -105,6 +105,9 @@ func getOrdersHandler(c *gin.Context) {
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limit <= 0 {
 		limit = 20
+	}
+	if limit > 200 {
+		limit = 200 // giới hạn tối đa
 	}
 	page, err := strconv.Atoi(pageStr)
 	if err != nil || page <= 0 {
