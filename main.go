@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -180,6 +181,9 @@ func getOrdersByIntervalHandlerSimple(c *gin.Context) {
 	}
 	dbDate := parsedDate.Format("02/01/2006")
 
+	// Debug: log filter để kiểm tra
+	fmt.Printf("Filter: Symbol=%s, TradingDate=%s\n", symbol, dbDate)
+
 	limit, _ := strconv.Atoi(limitStr)
 	if limit <= 0 || limit > 400 {
 		limit = 100
@@ -200,6 +204,11 @@ func getOrdersByIntervalHandlerSimple(c *gin.Context) {
 		"Symbol":      symbol,
 		"TradingDate": dbDate,
 	}
+
+	// Debug: cũng thử query chỉ symbol để xem có data không
+	countFilter := bson.M{"Symbol": symbol}
+	totalCount, _ := collection.CountDocuments(ctx, countFilter)
+	fmt.Printf("Total records for Symbol %s: %d\n", symbol, totalCount)
 	opts := options.Find().
 		SetSort(bson.M{"Time": -1}).
 		SetSkip(int64(offset)).
@@ -217,6 +226,9 @@ func getOrdersByIntervalHandlerSimple(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Debug: log số lượng kết quả
+	fmt.Printf("Found %d results for Symbol=%s, TradingDate=%s\n", len(results), symbol, dbDate)
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": results,
