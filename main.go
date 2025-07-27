@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"math"
 	"net/http"
 	"strconv"
 	"sync"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/sync/singleflight"
@@ -22,7 +20,7 @@ var mongoClient *mongo.Client
 func main() {
 	// Khởi tạo kết nối MongoDB một lần duy nhất
 	var err error
-	mongoURI := "mongodb://admin:abc123@127.0.0.1:27017/admin"
+	mongoURI := "mongodb://admin:abc123@34.124.191.19:27017/admin"
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -164,7 +162,6 @@ func getOrdersHandler(c *gin.Context) {
 // Phiên bản đơn giản hơn nữa - chỉ lấy records theo khoảng cách thời gian
 func getOrdersByIntervalHandlerSimple(c *gin.Context) {
 	symbol := c.Query("symbol")
-	intervalStr := c.DefaultQuery("interval", "1m")
 	limitStr := c.DefaultQuery("limit", "20")
 	pageStr := c.DefaultQuery("page", "1")
 
@@ -173,44 +170,27 @@ func getOrdersByIntervalHandlerSimple(c *gin.Context) {
 		return
 	}
 
-	interval, err := time.ParseDuration(intervalStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid interval format"})
-		return
-	}
-
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit <= 0 {
+	limit, _ := strconv.Atoi(limitStr)
+	if limit <= 0 || limit > 400 {
 		limit = 20
 	}
-	if limit > 400 {
-		limit = 400
-	}
 
-	page, err := strconv.Atoi(pageStr)
-	if err != nil || page <= 0 {
+	page, _ := strconv.Atoi(pageStr)
+	if page <= 0 {
 		page = 1
 	}
 
 	collection := mongoClient.Database("moneyflow").Collection("orders")
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Tính toán offset cho phân trang
 	offset := (page - 1) * limit
 
-	// Lấy nhiều records để có buffer data cho phân trang
-	bufferMultiplier := 30 // Tăng buffer để đảm bảo có đủ data sau khi lọc
-	totalBufferLimit := limit * bufferMultiplier
-	if page > 1 {
-		// Với các trang sau, cần buffer nhiều hơn
-		totalBufferLimit = (offset + limit) * bufferMultiplier
-	}
-
-	filter := bson.M{"symbol": symbol}
+	filter := bson.M{"Symbol": symbol}
 	opts := options.Find().
-		SetSort(bson.M{"time": -1}).
-		SetLimit(int64(totalBufferLimit))
+		SetSort(bson.M{"Time": -1}).
+		SetSkip(int64(offset)).
+		SetLimit(int64(limit))
 
 	cursor, err := collection.Find(ctx, filter, opts)
 	if err != nil {
@@ -219,99 +199,13 @@ func getOrdersByIntervalHandlerSimple(c *gin.Context) {
 	}
 	defer cursor.Close(ctx)
 
-	var allResults []bson.M
-	if err := cursor.All(ctx, &allResults); err != nil {
+	var results []bson.M
+	if err := cursor.All(ctx, &results); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	if len(allResults) == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "No data found"})
-		return
-	}
-
-	// Làm tròn mốc thời gian cuối về phút
-	firstTime, ok := allResults[0]["time"].(primitive.DateTime)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid time format"})
-		return
-	}
-	endTime := firstTime.Time().Truncate(time.Minute)
-
-	// Map các phút gần nhất
-	resultMap := make(map[int64]bson.M)
-	for _, doc := range allResults {
-		t, ok := doc["time"].(primitive.DateTime)
-		if !ok {
-			continue
-		}
-		docTime := t.Time().Truncate(time.Minute)
-		unixMin := docTime.Unix()
-
-		// Chỉ lưu lần đầu tiên gặp timestamp này
-		if _, exists := resultMap[unixMin]; !exists {
-			doc["time_truncated"] = docTime
-			resultMap[unixMin] = doc
-		}
-	}
-
-	// Tạo danh sách kết quả đầy đủ từ các thời điểm mục tiêu
-	var allTimeResults []bson.M
-	currentTarget := endTime
-
-	// Tạo đủ data cho phân trang (cần tính toán số lượng cần thiết)
-	maxResults := offset + limit
-	for len(allTimeResults) < maxResults*2 { // Buffer thêm để đảm bảo
-		unixMin := currentTarget.Unix()
-		if doc, ok := resultMap[unixMin]; ok {
-			doc["target_time"] = currentTarget
-			allTimeResults = append(allTimeResults, doc)
-		}
-		currentTarget = currentTarget.Add(-interval)
-
-		// Tránh vòng lặp vô hạn
-		if currentTarget.Before(endTime.Add(-interval * time.Duration(maxResults*3))) {
-			break
-		}
-	}
-
-	// Đảo ngược để theo thứ tự thời gian tăng dần
-	for i, j := 0, len(allTimeResults)-1; i < j; i, j = i+1, j-1 {
-		allTimeResults[i], allTimeResults[j] = allTimeResults[j], allTimeResults[i]
-	}
-
-	// Áp dụng phân trang
-	var results []bson.M
-	totalResults := len(allTimeResults)
-
-	if offset >= totalResults {
-		results = []bson.M{}
-	} else {
-		endIndex := offset + limit
-		if endIndex > totalResults {
-			endIndex = totalResults
-		}
-		results = allTimeResults[offset:endIndex]
-	}
-
-	// Tính toán thông tin phân trang
-	totalPages := int(math.Ceil(float64(totalResults) / float64(limit)))
-	hasNextPage := page < totalPages
-	hasPrevPage := page > 1
-
 	c.JSON(http.StatusOK, gin.H{
-		"data":     results,
-		"symbol":   symbol,
-		"interval": interval.String(),
-		"end_time": endTime,
-		"pagination": gin.H{
-			"current_page":  page,
-			"per_page":      limit,
-			"total_results": totalResults,
-			"total_pages":   totalPages,
-			"has_next_page": hasNextPage,
-			"has_prev_page": hasPrevPage,
-		},
-		"count": len(results),
+		"data": results,
 	})
 }
