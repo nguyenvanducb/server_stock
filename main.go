@@ -163,17 +163,26 @@ func getOrdersHandler(c *gin.Context) {
 // Phiên bản đơn giản hơn nữa - chỉ lấy records theo khoảng cách thời gian
 func getOrdersByIntervalHandlerSimple(c *gin.Context) {
 	symbol := c.Query("symbol")
+	date := c.Query("date")
 	limitStr := c.DefaultQuery("limit", "20")
 	pageStr := c.DefaultQuery("page", "1")
 
-	if symbol == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol is required"})
+	if symbol == "" || date == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol and date are required"})
 		return
 	}
 
+	// Convert date from "2025-07-25" to "25/07/2025"
+	parsedDate, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date format, use YYYY-MM-DD"})
+		return
+	}
+	dbDate := parsedDate.Format("02/01/2006")
+
 	limit, _ := strconv.Atoi(limitStr)
 	if limit <= 0 || limit > 400 {
-		limit = 20
+		limit = 100
 	}
 
 	page, _ := strconv.Atoi(pageStr)
@@ -187,7 +196,10 @@ func getOrdersByIntervalHandlerSimple(c *gin.Context) {
 
 	offset := (page - 1) * limit
 
-	filter := bson.M{"Symbol": symbol}
+	filter := bson.M{
+		"Symbol":      symbol,
+		"TradingDate": dbDate,
+	}
 	opts := options.Find().
 		SetSort(bson.M{"Time": -1}).
 		SetSkip(int64(offset)).
