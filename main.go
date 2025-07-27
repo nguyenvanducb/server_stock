@@ -39,7 +39,6 @@ func main() {
 	r.GET("/api/code", getCachedHandler("moneyflow", "stock_code", 10*time.Second))
 	r.GET("/api/info", getCachedHandler("moneyflow", "info_stocks", 100000*time.Second))
 	r.GET("/api/orders", getOrdersHandler)
-	r.GET("/api/orders/interval", getOrdersByIntervalHandlerSimple)
 
 	r.Run(":8001")
 }
@@ -50,6 +49,7 @@ var (
 )
 
 func getCachedHandler(dbName, collName string, ttl time.Duration) gin.HandlerFunc {
+	print("getCachedHandler")
 	return func(c *gin.Context) {
 		cacheKey := dbName + "_" + collName
 
@@ -100,43 +100,44 @@ func getCachedHandler(dbName, collName string, ttl time.Duration) gin.HandlerFun
 }
 
 func getOrdersHandler(c *gin.Context) {
+	fmt.Println("===> getOrdersHandler called")
+
 	symbol := c.Query("symbol")
-	dateStr := c.Query("date")
+	dateStr := c.Query("date") // dạng DD/MM/YYYY
 	limitStr := c.DefaultQuery("limit", "20")
 	pageStr := c.DefaultQuery("page", "1")
+
+	if symbol == "" || dateStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol and date are required"})
+		return
+	}
+
+	// Không cần parse date nếu client gửi đúng định dạng luôn
 
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limit <= 0 {
 		limit = 20
 	}
 	if limit > 200 {
-		limit = 200 // giới hạn tối đa
+		limit = 200
 	}
+
 	page, err := strconv.Atoi(pageStr)
 	if err != nil || page <= 0 {
 		page = 1
 	}
 	skip := (page - 1) * limit
 
-	// Parse ngày
-	layout := "2006-01-02"
-	dayStart, err := time.Parse(layout, dateStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date format. Use YYYY-MM-DD"})
-		return
-	}
-	dayEnd := dayStart.Add(24 * time.Hour)
-
 	filter := bson.M{
-		"symbol": symbol,
-		"time": bson.M{
-			"$gte": dayStart,
-			"$lt":  dayEnd,
-		},
+		"Symbol":      symbol,
+		"TradingDate": dateStr,
 	}
 
 	collection := mongoClient.Database("moneyflow").Collection("orders")
-	opts := options.Find().SetSort(bson.M{"time": -1}).SetSkip(int64(skip)).SetLimit(int64(limit))
+	opts := options.Find().
+		SetSort(bson.M{"Time": -1}).
+		SetSkip(int64(skip)).
+		SetLimit(int64(limit))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -158,79 +159,5 @@ func getOrdersHandler(c *gin.Context) {
 		"data":  results,
 		"page":  page,
 		"limit": limit,
-	})
-}
-
-// Phiên bản đơn giản hơn nữa - chỉ lấy records theo khoảng cách thời gian
-func getOrdersByIntervalHandlerSimple(c *gin.Context) {
-	symbol := c.Query("symbol")
-	date := c.Query("date")
-	limitStr := c.DefaultQuery("limit", "20")
-	pageStr := c.DefaultQuery("page", "1")
-
-	if symbol == "" || date == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol and date are required"})
-		return
-	}
-
-	// Convert date from "2025-07-25" to "25/07/2025"
-	parsedDate, err := time.Parse("2006-01-02", date)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date format, use YYYY-MM-DD"})
-		return
-	}
-	dbDate := parsedDate.Format("02/01/2006")
-
-	// Debug: log filter để kiểm tra
-	fmt.Printf("Filter: Symbol=%s, TradingDate=%s\n", symbol, dbDate)
-
-	limit, _ := strconv.Atoi(limitStr)
-	if limit <= 0 || limit > 400 {
-		limit = 100
-	}
-
-	page, _ := strconv.Atoi(pageStr)
-	if page <= 0 {
-		page = 1
-	}
-
-	collection := mongoClient.Database("moneyflow").Collection("orders")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	offset := (page - 1) * limit
-
-	filter := bson.M{
-		"Symbol":      symbol,
-		"TradingDate": dbDate,
-	}
-
-	// Debug: cũng thử query chỉ symbol để xem có data không
-	countFilter := bson.M{"Symbol": symbol}
-	totalCount, _ := collection.CountDocuments(ctx, countFilter)
-	fmt.Printf("Total records for Symbol %s: %d\n", symbol, totalCount)
-	opts := options.Find().
-		SetSort(bson.M{"Time": -1}).
-		SetSkip(int64(offset)).
-		SetLimit(int64(limit))
-
-	cursor, err := collection.Find(ctx, filter, opts)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	defer cursor.Close(ctx)
-
-	var results []bson.M
-	if err := cursor.All(ctx, &results); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Debug: log số lượng kết quả
-	fmt.Printf("Found %d results for Symbol=%s, TradingDate=%s\n", len(results), symbol, dbDate)
-
-	c.JSON(http.StatusOK, gin.H{
-		"data": results,
 	})
 }
