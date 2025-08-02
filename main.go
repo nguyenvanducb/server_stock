@@ -21,8 +21,8 @@ var mongoClient *mongo.Client
 func main() {
 	// Khởi tạo kết nối MongoDB một lần duy nhất
 	var err error
-	mongoURI := "mongodb://admin:abc123@127.0.0.1:27017/admin"
-	// mongoURI := "mongodb://admin:abc123@34.124.191.19:27017/admin"
+	// mongoURI := "mongodb://admin:abc123@127.0.0.1:27017/admin"
+	mongoURI := "mongodb://admin:abc123@34.124.132.235:27017/admin"
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
