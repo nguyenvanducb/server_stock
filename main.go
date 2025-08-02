@@ -39,6 +39,7 @@ func main() {
 	r.GET("/api/code", getCachedHandler("moneyflow", "stock_code", 10*time.Second))
 	r.GET("/api/info", getCachedHandler("moneyflow", "info_stocks", 100000*time.Second))
 	r.GET("/api/orders", getOrdersHandler)
+	r.GET("/api/candles", getCandlesHandler)
 
 	r.Run(":8001")
 }
@@ -160,4 +161,70 @@ func getOrdersHandler(c *gin.Context) {
 		"page":  page,
 		"limit": limit,
 	})
+}
+func getCandlesHandler(c *gin.Context) {
+	fmt.Println("===> getCandlesHandler called")
+
+	symbol := c.Query("symbol")
+	interval := c.DefaultQuery("interval", "1m")
+	limitStr := c.DefaultQuery("limit", "200")
+
+	if symbol == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol is required"})
+		return
+	}
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = 200
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	filter := bson.M{"symbol": symbol, "interval": interval}
+
+	collection := mongoClient.Database("binance").Collection("klines")
+	opts := options.Find().
+		SetSort(bson.M{"openTime": 1}).
+		SetLimit(int64(limit))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cursor, err := collection.Find(ctx, filter, opts)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var results []bson.M
+	if err := cursor.All(ctx, &results); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Convert to Binance format (array of arrays)
+	var klineArrays [][]interface{}
+	for _, doc := range results {
+		klineArray := []interface{}{
+			doc["openTime"],                 // 0
+			doc["open"],                     // 1
+			doc["high"],                     // 2
+			doc["low"],                      // 3
+			doc["close"],                    // 4
+			doc["volume"],                   // 5
+			doc["closeTime"],                // 6
+			doc["quoteAssetVolume"],         // 7
+			doc["numberOfTrades"],           // 8
+			doc["takerBuyBaseAssetVolume"],  // 9
+			doc["takerBuyQuoteAssetVolume"], // 10
+			"0",                             // 11 - Ignore field
+		}
+		klineArrays = append(klineArrays, klineArray)
+	}
+
+	// Trả về trực tiếp array, không wrap trong object
+	c.JSON(http.StatusOK, klineArrays)
 }
