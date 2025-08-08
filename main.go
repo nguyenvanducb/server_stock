@@ -215,7 +215,7 @@ func getOrdersHandler(c *gin.Context) {
 		SetSkip(int64(skip)).
 		SetLimit(int64(limit))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	cursor, err := collection.Find(ctx, filter, opts)
