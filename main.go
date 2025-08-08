@@ -56,9 +56,25 @@ var (
 	group singleflight.Group
 )
 
-func getCachedHandlerWithFilter(dbName, collName string, ttl time.Duration, filter bson.M) gin.HandlerFunc {
+func getCachedHandlerWithFilter(dbName, collName string, ttl time.Duration, baseFilter bson.M) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Tạo filter động bằng cách copy baseFilter
+		filter := bson.M{}
+		for key, value := range baseFilter {
+			filter[key] = value
+		}
+
+		// Thêm marketId filter nếu có
+		marketId := c.Query("marketId")
+		if marketId != "" {
+			filter["MarketId"] = marketId
+		}
+
+		// Tạo cache key bao gồm marketId để tránh conflict
 		cacheKey := dbName + "_" + collName + "_filtered"
+		if marketId != "" {
+			cacheKey += "_" + marketId
+		}
 
 		// Check cache trước
 		if data, ok := cache.Load(cacheKey); ok {
@@ -73,7 +89,7 @@ func getCachedHandlerWithFilter(dbName, collName string, ttl time.Duration, filt
 
 			collection := mongoClient.Database(dbName).Collection(collName)
 
-			// Sử dụng filter được truyền vào
+			// Sử dụng filter đã được build động
 			cursor, err := collection.Find(ctx, filter)
 			if err != nil {
 				return nil, err
