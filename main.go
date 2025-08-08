@@ -209,7 +209,7 @@ func getOrdersHandler(c *gin.Context) {
 		"TradingDate": dateStr,
 	}
 
-	collection := mongoClient.Database("moneyflow").Collection("orders")
+	collection := mongoClient.Database("moneyflow").Collection("matchs")
 	opts := options.Find().
 		SetSort(bson.M{"Time": -1}).
 		SetSkip(int64(skip)).
