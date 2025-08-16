@@ -36,7 +36,7 @@ func main() {
 
 	// Đăng ký các route sử dụng handler chung
 	r.GET("/api/tc", getCachedHandler("moneyflow", "tc", 1000*time.Second))
-	r.GET("/api/info", getCachedHandler("moneyflow", "info_stocks", 100000*time.Second))
+	r.GET("/api/info", getCachedHandler("moneyflow", "info_stocks", 10000*time.Second))
 	r.GET("/api/orders", getOrdersHandler)
 	r.GET("/api/candles", getCandlesHandlerTest)
 	r.GET("/api/code", getCachedHandlerWithFilter("moneyflow", "stock_code", 10*time.Second, bson.M{
