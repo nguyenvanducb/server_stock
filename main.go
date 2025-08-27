@@ -47,6 +47,7 @@ func main() {
 			},
 		},
 	}))
+	r.GET("/api/exchange", getCachedHandlerWithFilter("moneyflow", "exchange", 10*time.Second, bson.M{}))
 
 	r.Run(":8001")
 }
