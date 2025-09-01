@@ -48,6 +48,7 @@ func main() {
 		},
 	}))
 	r.GET("/api/exchange", getCachedHandlerWithFilter("moneyflow", "exchange", 10*time.Second, bson.M{}))
+	r.GET("/api/onlycode", getOnlyCodeHandler()) // lấy duy nhất Mã Chứng khoán
 
 	r.Run(":8001")
 }
@@ -304,6 +305,45 @@ func getCandlesHandler(c *gin.Context) {
 	// Trả về trực tiếp array, không wrap trong object
 	c.JSON(http.StatusOK, klineArrays)
 }
+
+// Function trả về handler cho API onlycode
+func getOnlyCodeHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		stockCode := c.Request.URL.RawQuery
+		if stockCode == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Missing stock code"})
+			return
+		}
+
+		result, err := fetchSingleStock("moneyflow", "stock_code", stockCode, c.Query("marketId"))
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": result})
+	}
+}
+
+// Function riêng để query MongoDB 1 stock
+func fetchSingleStock(dbName, collName, stockCode, marketId string) (bson.M, error) {
+	filter := bson.M{"Symbol": stockCode}
+	if marketId != "" {
+		filter["MarketId"] = marketId
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var result bson.M
+	err := mongoClient.Database(dbName).Collection(collName).FindOne(ctx, filter).Decode(&result)
+	return result, err
+}
+
 func getCandlesHandlerTest(c *gin.Context) {
 	fmt.Println("===> getCandlesHandler called")
 
