@@ -213,12 +213,13 @@ func getOrdersHandler(c *gin.Context) {
 	var opts *options.FindOptions
 
 	if dateStr == "" {
-		// ✅ Không có date → chỉ lấy limit lệnh đầu tiên của mã
+		// ✅ Không có date → lấy các lệnh mới nhất (ở cuối DB)
 		filter = bson.M{"Symbol": symbol}
 
 		opts = options.Find().
-			SetLimit(int64(limit)).
-			SetSkip(int64(skip))
+			SetSort(bson.M{"_id": -1}). // lấy document mới nhất
+			SetSkip(int64(skip)).
+			SetLimit(int64(limit))
 	} else {
 		// ✅ Chuẩn hoá ngày nếu có
 		if strings.Contains(dateStr, "-") {
@@ -234,7 +235,7 @@ func getOrdersHandler(c *gin.Context) {
 		}
 
 		opts = options.Find().
-			SetSort(bson.M{"Time": -1}).
+			SetSort(bson.M{"Time": -1}). // sort theo Time giảm dần
 			SetSkip(int64(skip)).
 			SetLimit(int64(limit))
 	}
