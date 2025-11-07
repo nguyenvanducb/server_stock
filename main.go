@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -181,7 +182,7 @@ func getOrdersHandler(c *gin.Context) {
 	fmt.Println("===> getOrdersHandler called")
 
 	symbol := c.Query("symbol")
-	dateStr := c.Query("date") // dạng DD/MM/YYYY
+	dateStr := c.Query("date") // dạng DD/MM/YYYY hoặc YYYY-MM-DD
 	limitStr := c.DefaultQuery("limit", "20")
 	pageStr := c.DefaultQuery("page", "1")
 
@@ -190,7 +191,13 @@ func getOrdersHandler(c *gin.Context) {
 		return
 	}
 
-	// Không cần parse date nếu client gửi đúng định dạng luôn
+	// ✅ Chuẩn hoá ngày — nếu client gửi dạng YYYY-MM-DD thì chuyển sang DD/MM/YYYY để khớp DB
+	if strings.Contains(dateStr, "-") {
+		parts := strings.Split(dateStr, "-")
+		if len(parts) == 3 {
+			dateStr = fmt.Sprintf("%s/%s/%s", parts[2], parts[1], parts[0])
+		}
+	}
 
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limit <= 0 {
@@ -210,6 +217,8 @@ func getOrdersHandler(c *gin.Context) {
 		"Symbol":      symbol,
 		"TradingDate": dateStr,
 	}
+
+	fmt.Printf("Mongo filter: %+v\n", filter)
 
 	collection := mongoClient.Database("moneyflow").Collection("matchs")
 	opts := options.Find().
@@ -239,6 +248,7 @@ func getOrdersHandler(c *gin.Context) {
 		"limit": limit,
 	})
 }
+
 func getCandlesHandler(c *gin.Context) {
 	fmt.Println("===> getCandlesHandler called")
 
