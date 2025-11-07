@@ -182,21 +182,13 @@ func getOrdersHandler(c *gin.Context) {
 	fmt.Println("===> getOrdersHandler called")
 
 	symbol := c.Query("symbol")
-	dateStr := c.Query("date") // dạng DD/MM/YYYY hoặc YYYY-MM-DD
+	dateStr := c.Query("date")
 	limitStr := c.DefaultQuery("limit", "20")
 	pageStr := c.DefaultQuery("page", "1")
 
-	if symbol == "" || dateStr == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol and date are required"})
+	if symbol == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol is required"})
 		return
-	}
-
-	// ✅ Chuẩn hoá ngày — nếu client gửi dạng YYYY-MM-DD thì chuyển sang DD/MM/YYYY để khớp DB
-	if strings.Contains(dateStr, "-") {
-		parts := strings.Split(dateStr, "-")
-		if len(parts) == 3 {
-			dateStr = fmt.Sprintf("%s/%s/%s", parts[2], parts[1], parts[0])
-		}
 	}
 
 	limit, err := strconv.Atoi(limitStr)
@@ -213,21 +205,41 @@ func getOrdersHandler(c *gin.Context) {
 	}
 	skip := (page - 1) * limit
 
-	filter := bson.M{
-		"Symbol":      symbol,
-		"TradingDate": dateStr,
+	collection := mongoClient.Database("moneyflow").Collection("matchs")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var filter bson.M
+	var opts *options.FindOptions
+
+	if dateStr == "" {
+		// ✅ Không có date → chỉ lấy limit lệnh đầu tiên của mã
+		filter = bson.M{"Symbol": symbol}
+
+		opts = options.Find().
+			SetLimit(int64(limit)).
+			SetSkip(int64(skip))
+	} else {
+		// ✅ Chuẩn hoá ngày nếu có
+		if strings.Contains(dateStr, "-") {
+			parts := strings.Split(dateStr, "-")
+			if len(parts) == 3 {
+				dateStr = fmt.Sprintf("%s/%s/%s", parts[2], parts[1], parts[0])
+			}
+		}
+
+		filter = bson.M{
+			"Symbol":      symbol,
+			"TradingDate": dateStr,
+		}
+
+		opts = options.Find().
+			SetSort(bson.M{"Time": -1}).
+			SetSkip(int64(skip)).
+			SetLimit(int64(limit))
 	}
 
 	fmt.Printf("Mongo filter: %+v\n", filter)
-
-	collection := mongoClient.Database("moneyflow").Collection("matchs")
-	opts := options.Find().
-		SetSort(bson.M{"Time": -1}).
-		SetSkip(int64(skip)).
-		SetLimit(int64(limit))
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 
 	cursor, err := collection.Find(ctx, filter, opts)
 	if err != nil {
