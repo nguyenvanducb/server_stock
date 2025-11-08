@@ -235,7 +235,7 @@ func getOrdersHandler(c *gin.Context) {
 		}
 
 		opts = options.Find().
-			SetSort(bson.M{"Time": -1}). // sort theo Time giảm dần
+			// SetSort(bson.M{"Time": -1}). // sort theo Time giảm dần
 			SetSkip(int64(skip)).
 			SetLimit(int64(limit))
 	}
