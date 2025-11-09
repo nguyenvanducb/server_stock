@@ -217,7 +217,7 @@ func getOrdersHandler(c *gin.Context) {
 		filter = bson.M{"Symbol": symbol}
 
 		opts = options.Find().
-			SetSort(bson.M{"_id": 1}). // lấy document mới nhất
+			SetSort(bson.M{"_id": -1}). // lấy document mới nhất
 			SetSkip(int64(skip)).
 			SetLimit(int64(limit))
 	} else {
@@ -235,7 +235,7 @@ func getOrdersHandler(c *gin.Context) {
 		}
 
 		opts = options.Find().
-			// SetSort(bson.M{"Time": -1}). // sort theo Time giảm dần
+			SetSort(bson.M{"Time": -1}). // sort theo Time giảm dần
 			SetSkip(int64(skip)).
 			SetLimit(int64(limit))
 	}
