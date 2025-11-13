@@ -6,12 +6,12 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/sync/singleflight"
@@ -179,12 +179,9 @@ func getCachedHandler(dbName, collName string, ttl time.Duration) gin.HandlerFun
 }
 
 func getOrdersHandler(c *gin.Context) {
-	fmt.Println("===> getOrdersHandler called")
-
 	symbol := c.Query("symbol")
-	dateStr := c.Query("date")
+	lastIDStr := c.Query("last_id") // _id của lệnh cuối cùng client đã có
 	limitStr := c.DefaultQuery("limit", "20")
-	pageStr := c.DefaultQuery("page", "1")
 
 	if symbol == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol is required"})
@@ -199,48 +196,23 @@ func getOrdersHandler(c *gin.Context) {
 		limit = 200
 	}
 
-	page, err := strconv.Atoi(pageStr)
-	if err != nil || page <= 0 {
-		page = 1
-	}
-	skip := (page - 1) * limit
-
 	collection := mongoClient.Database("moneyflow").Collection("matchs")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	var filter bson.M
-	var opts *options.FindOptions
+	filter := bson.M{"Symbol": symbol}
 
-	if dateStr == "" {
-		// ✅ Không có date → lấy các lệnh mới nhất (ở cuối DB)
-		filter = bson.M{"Symbol": symbol}
-
-		opts = options.Find().
-			SetSort(bson.M{"_id": -1}). // lấy document mới nhất
-			SetSkip(int64(skip)).
-			SetLimit(int64(limit))
-	} else {
-		// ✅ Chuẩn hoá ngày nếu có
-		if strings.Contains(dateStr, "-") {
-			parts := strings.Split(dateStr, "-")
-			if len(parts) == 3 {
-				dateStr = fmt.Sprintf("%s/%s/%s", parts[2], parts[1], parts[0])
-			}
+	// Nếu last_id có giá trị → lấy các record _id < last_id (cũ hơn)
+	if lastIDStr != "" {
+		lastID, err := primitive.ObjectIDFromHex(lastIDStr)
+		if err == nil {
+			filter["_id"] = bson.M{"$lt": lastID}
 		}
-
-		filter = bson.M{
-			"Symbol":      symbol,
-			"TradingDate": dateStr,
-		}
-
-		opts = options.Find().
-			SetSort(bson.M{"Time": -1}). // sort theo Time giảm dần
-			SetSkip(int64(skip)).
-			SetLimit(int64(limit))
 	}
 
-	fmt.Printf("Mongo filter: %+v\n", filter)
+	opts := options.Find().
+		SetSort(bson.M{"_id": -1}). // giảm dần → record mới nhất trước last_id
+		SetLimit(int64(limit))
 
 	cursor, err := collection.Find(ctx, filter, opts)
 	if err != nil {
@@ -257,7 +229,6 @@ func getOrdersHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"data":  results,
-		"page":  page,
 		"limit": limit,
 	})
 }
