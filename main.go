@@ -182,12 +182,16 @@ func getOrdersHandler(c *gin.Context) {
 	symbol := c.Query("symbol")
 	lastIDStr := c.Query("last_id") // _id của lệnh cuối cùng client đã có
 	limitStr := c.DefaultQuery("limit", "20")
+	isGroupedStr := c.DefaultQuery("isGrouped", "0")
 
 	if symbol == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol is required"})
 		return
 	}
-
+	isGrouped := false
+	if isGroupedStr == "1" {
+		isGrouped = true
+	}
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limit <= 0 {
 		limit = 20
@@ -196,7 +200,11 @@ func getOrdersHandler(c *gin.Context) {
 		limit = 200
 	}
 
-	collection := mongoClient.Database("moneyflow").Collection("matchs")
+	collectionName := "matchs"
+	if isGrouped {
+		collectionName = "matchs_day"
+	}
+	collection := mongoClient.Database("moneyflow").Collection(collectionName)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
