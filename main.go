@@ -18,6 +18,10 @@ import (
 )
 
 var mongoClient *mongo.Client
+var (
+	cache sync.Map
+	group singleflight.Group
+)
 
 func main() {
 	// Khởi tạo kết nối MongoDB một lần duy nhất
@@ -34,6 +38,22 @@ func main() {
 	defer mongoClient.Disconnect(ctx)
 
 	r := gin.Default()
+
+	// ---- FCM setup ----
+	db := mongoClient.Database("moneyflow")
+
+	// Create indexes for FCM tokens (only once at startup)
+	ctxIndex, cancelIndex := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelIndex()
+	if err := EnsureFCMIndexes(ctxIndex, db); err != nil {
+		log.Fatalf("EnsureFCMIndexes failed: %v", err)
+	}
+
+	// FCM routes
+	r.POST("/api/fcm/register", RegisterFCMTokenHandler(db))
+	r.POST("/api/fcm/deactivate", DeactivateFCMTokenHandler(db))
+	r.GET("/api/fcm/tokens", ListActiveTokensHandler(db))
+	// ---- End FCM setup ----
 
 	// Đăng ký các route sử dụng handler chung
 	r.GET("/api/tc", getCachedHandler("moneyflow", "tc", 1000*time.Second))
@@ -53,11 +73,6 @@ func main() {
 
 	r.Run(":8001")
 }
-
-var (
-	cache sync.Map
-	group singleflight.Group
-)
 
 func getCachedHandlerWithFilter(dbName, collName string, ttl time.Duration, baseFilter bson.M) gin.HandlerFunc {
 	return func(c *gin.Context) {
