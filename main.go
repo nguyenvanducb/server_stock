@@ -256,15 +256,21 @@ func getOrdersHandler(c *gin.Context) {
 	// ------------------------------------------------------------
 	// FILTER
 	// ------------------------------------------------------------
-
 	filter := bson.M{
 		"Symbol": symbol,
 	}
 
-	// Lệnh lớn -> chỉ lấy Vol > 2000
 	if isLargeOrder {
-		filter["LastVol"] = bson.M{
-			"$gt": 2000,
+		filter["$expr"] = bson.M{
+			"$gt": bson.A{
+				bson.M{
+					"$multiply": bson.A{
+						"$LastPrice",
+						"$LastVol",
+					},
+				},
+				200_000_000,
+			},
 		}
 	}
 
