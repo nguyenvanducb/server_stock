@@ -263,7 +263,7 @@ func getOrdersHandler(c *gin.Context) {
 
 	// Lệnh lớn -> chỉ lấy Vol > 2000
 	if isLargeOrder {
-		filter["Vol"] = bson.M{
+		filter["LastVol"] = bson.M{
 			"$gt": 2000,
 		}
 	}
