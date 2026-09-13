@@ -195,58 +195,132 @@ func getCachedHandler(dbName, collName string, ttl time.Duration) gin.HandlerFun
 
 func getOrdersHandler(c *gin.Context) {
 	symbol := c.Query("symbol")
-	lastIDStr := c.Query("last_id") // _id của lệnh cuối cùng client đã có
+	lastIDStr := c.Query("last_id")
 	limitStr := c.DefaultQuery("limit", "20")
+
 	isGroupedStr := c.DefaultQuery("isGrouped", "0")
+	isLargeOrderStr := c.DefaultQuery("isLargeOrder", "0")
 
 	if symbol == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol is required"})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "symbol is required",
+		})
 		return
 	}
-	isGrouped := false
-	if isGroupedStr == "1" {
-		isGrouped = true
-	}
+
+	isGrouped := isGroupedStr == "1"
+	isLargeOrder := isLargeOrderStr == "1"
+
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limit <= 0 {
 		limit = 20
 	}
+
 	if limit > 200 {
 		limit = 200
 	}
 
+	// ------------------------------------------------------------
+	// COLLECTION
+	//
+	// Lệnh khớp:
+	//   isGrouped=0
+	//   isLargeOrder=0
+	//   -> matchs
+	//
+	// Gộp khớp:
+	//   isGrouped=1
+	//   -> matchs_day
+	//
+	// Lệnh lớn:
+	//   isLargeOrder=1
+	//   -> matchs_day + Vol > 2000
+	// ------------------------------------------------------------
+
 	collectionName := "matchs"
-	if isGrouped {
+
+	if isGrouped || isLargeOrder {
 		collectionName = "matchs_day"
 	}
-	collection := mongoClient.Database("moneyflow").Collection(collectionName)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+
+	collection := mongoClient.
+		Database("moneyflow").
+		Collection(collectionName)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		30*time.Second,
+	)
 	defer cancel()
 
-	filter := bson.M{"Symbol": symbol}
+	// ------------------------------------------------------------
+	// FILTER
+	// ------------------------------------------------------------
 
-	// Nếu last_id có giá trị → lấy các record _id < last_id (cũ hơn)
-	if lastIDStr != "" {
-		lastID, err := primitive.ObjectIDFromHex(lastIDStr)
-		if err == nil {
-			filter["_id"] = bson.M{"$lt": lastID}
+	filter := bson.M{
+		"Symbol": symbol,
+	}
+
+	// Lệnh lớn -> chỉ lấy Vol > 2000
+	if isLargeOrder {
+		filter["Vol"] = bson.M{
+			"$gt": 2000,
 		}
 	}
 
+	// ------------------------------------------------------------
+	// PAGINATION
+	// ------------------------------------------------------------
+
+	if lastIDStr != "" {
+		lastID, err := primitive.ObjectIDFromHex(lastIDStr)
+
+		if err == nil {
+			filter["_id"] = bson.M{
+				"$lt": lastID,
+			}
+		}
+	}
+
+	// ------------------------------------------------------------
+	// QUERY OPTIONS
+	// ------------------------------------------------------------
+
 	opts := options.Find().
-		SetSort(bson.M{"_id": -1}). // giảm dần → record mới nhất trước last_id
+		SetSort(bson.M{
+			"_id": -1,
+		}).
 		SetLimit(int64(limit))
 
-	cursor, err := collection.Find(ctx, filter, opts)
+	// ------------------------------------------------------------
+	// QUERY
+	// ------------------------------------------------------------
+
+	cursor, err := collection.Find(
+		ctx,
+		filter,
+		opts,
+	)
+
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
 		return
 	}
+
 	defer cursor.Close(ctx)
 
+	// ------------------------------------------------------------
+	// RESULT
+	// ------------------------------------------------------------
+
 	var results []bson.M
+
 	if err := cursor.All(ctx, &results); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
 		return
 	}
 
